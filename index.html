@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sudoku Game</title>
+<style>
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #eef2ff;
+  color: #172554;
+  display: flex;
+  justify-content: center;
+  padding: 25px 10px;
+}
+
+.game {
+  width: 100%;
+  max-width: 500px;
+  text-align: center;
+}
+
+h1 { margin-bottom: 6px; color: #4338ca; }
+p { color: #64748b; }
+
+.controls {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
+select, button {
+  padding: 10px 13px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button {
+  background: #4f46e5;
+  color: white;
+}
+
+button:hover { background: #3730a3; }
+
+#board {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  width: 100%;
+  aspect-ratio: 1;
+  border: 3px solid #1e293b;
+  background: white;
+}
+
+.cell {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid #cbd5e1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: clamp(16px, 4.5vw, 24px);
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 0;
+  background: white;
+  color: #4338ca;
+}
+
+.cell:nth-child(3n) { border-right: 2px solid #334155; }
+.cell:nth-child(9n) { border-right: 0; }
+.cell:nth-child(n+19):nth-child(-n+27),
+.cell:nth-child(n+46):nth-child(-n+54) {
+  border-bottom: 2px solid #334155;
+}
+
+.cell.fixed {
+  color: #0f172a;
+  font-weight: bold;
+  background: #f1f5f9;
+}
+
+.cell.selected { background: #c7d2fe; }
+.cell.related { background: #eef2ff; }
+.cell.same { background: #ddd6fe; }
+.cell.error { background: #fecaca; color: #b91c1c; }
+
+.numbers {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 5px;
+  margin-top: 15px;
+}
+
+.numbers button {
+  padding: 12px 0;
+  font-size: 19px;
+  font-weight: bold;
+  background: #6366f1;
+}
+
+.numbers button:disabled {
+  background: #cbd5e1;
+  color: #64748b;
+  cursor: default;
+}
+
+#message {
+  min-height: 25px;
+  margin-top: 15px;
+  font-weight: bold;
+}
+
+@media (max-width: 350px) {
+  .cell { font-size: 14px; }
+  .numbers { gap: 3px; }
+}
+</style>
+</head>
+<body>
+<div class="game">
+  <h1>Sudoku</h1>
+  <p>Fill every row, column and 3×3 box with numbers 1–9.</p>
+
+  <div class="controls">
+    <select id="difficulty" aria-label="Difficulty">
+      <option value="easy">Easy</option>
+      <option value="medium" selected>Medium</option>
+      <option value="hard">Hard</option>
+    </select>
+    <button onclick="newGame()">New Game</button>
+    <button onclick="checkBoard()">Check</button>
+    <button onclick="hint()">Hint</button>
+    <button onclick="resetGame()">Reset</button>
+  </div>
+
+  <div id="board"></div>
+  <div class="numbers" id="numbers"></div>
+  <div id="message" role="status">Choose a cell and a number.</div>
+</div>
+
+<script>
+let solution = [];
+let puzzle = [];
+let original = [];
+let selected = -1;
+let mistakes = 0;
+
+const board = document.getElementById("board");
+const numberPanel = document.getElementById("numbers");
+const message = document.getElementById("message");
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function makeSolution() {
+  // Generate a valid Sudoku solution using row, column,
+  // and digit permutations of a valid base pattern.
+  const bands = shuffle([0, 1, 2]);
+  const rows = [];
+  bands.forEach(b => {
+    shuffle([0, 1, 2]).forEach(r => rows.push(b * 3 + r));
+  });
+
+  const stacks = shuffle([0, 1, 2]);
+  const cols = [];
+  stacks.forEach(s => {
+    shuffle([0, 1, 2]).forEach(c => cols.push(s * 3 + c));
+  });
+
+  const digits = shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+  return rows.map(r => cols.map(c => {
+    const pattern = (r * 3 + Math.floor(r / 3) + c) % 9;
+    return digits[pattern];
+  }));
+}
+
+function newGame() {
+  solution = makeSolution();
+  puzzle = solution.map(row => row.slice());
+
+  const level = document.getElementById("difficulty").value;
+  const holes = level === "easy" ? 35 :
+                level === "medium" ? 45 : 53;
+
+  // Remove a random number of cells to create the puzzle.
+  const positions = shuffle(
+    Array.from({ length: 81 }, (_, i) => i)
+  );
+
+  positions.slice(0, holes).forEach(i => {
+    puzzle[Math.floor(i / 9)][i % 9] = 0;
+  });
+
+  original = puzzle.map(row => row.slice());
+  selected = -1;
+  mistakes = 0;
+  render();
+  message.textContent = "New game started. Good luck!";
+}
+
+function render() {
+  board.innerHTML = "";
+  numberPanel.innerHTML = "";
+
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const i = r * 9 + c;
+      const cell = document.createElement("button");
+      cell.className = "cell";
+      cell.textContent = puzzle[r][c] || "";
+      cell.setAttribute("aria-label",
+        `Row ${r + 1}, column ${c + 1}, ${puzzle[r][c] || "empty"}`);
+
+      if (original[r][c] !== 0) cell.classList.add("fixed");
+      if (i === selected) cell.classList.add("selected");
+
+      if (selected >= 0) {
+        const sr = Math.floor(selected / 9);
+        const sc = selected % 9;
+        if (r === sr || c === sc ||
+            (Math.floor(r / 3) === Math.floor(sr / 3) &&
+             Math.floor(c / 3) === Math.floor(sc / 3))) {
+          cell.classList.add("related");
+        }
+        if (puzzle[r][c] &&
+            puzzle[r][c] === puzzle[sr][sc]) {
+          cell.classList.add("same");
+        }
+      }
+
+      cell.onclick = () => {
+        selected = i;
+        render();
+      };
+
+      board.appendChild(cell);
+    }
+  }
+
+  for (let n = 1; n <= 9; n++) {
+    const btn = document.createElement("button");
+    btn.textContent = n;
+    btn.onclick = () => enterNumber(n);
+
+    const count = puzzle.flat().filter(v => v === n).length;
+    btn.disabled = count === 9;
+    numberPanel.appendChild(btn);
+  }
+}
+
+function enterNumber(n) {
+  if (selected < 0) {
+    message.textContent = "Please select an empty cell first.";
+    return;
+  }
+
+  const r = Math.floor(selected / 9);
+  const c = selected % 9;
+
+  if (original[r][c] !== 0) {
+    message.textContent = "That number is fixed.";
+    return;
+  }
+
+  puzzle[r][c] = n;
+  render();
+
+  if (n !== solution[r][c]) {
+    mistakes++;
+    message.textContent = "Not correct. Try another number.";
+  } else {
+    message.textContent = "Good move!";
+    checkWin();
+  }
+}
+
+document.addEventListener("keydown", e => {
+  if (/^[1-9]$/.test(e.key)) enterNumber(Number(e.key));
+  if (e.key === "Backspace" || e.key === "Delete") eraseCell();
+});
+
+function eraseCell() {
+  if (selected < 0) return;
+  const r = Math.floor(selected / 9);
+  const c = selected % 9;
+  if (original[r][c] === 0) {
+    puzzle[r][c] = 0;
+    render();
+    message.textContent = "Cell cleared.";
+  }
+}
+
+function checkBoard() {
+  let wrong = 0;
+  let empty = 0;
+
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (puzzle[r][c] === 0) empty++;
+      else if (puzzle[r][c] !== solution[r][c]) wrong++;
+    }
+  }
+
+  if (wrong) {
+    message.textContent = `${wrong} incorrect cell(s). Keep trying!`;
+  } else if (empty) {
+    message.textContent = `${empty} cells remaining. Looking good!`;
+  } else {
+    checkWin();
+  }
+}
+
+function hint() {
+  const empty = [];
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (original[r][c] === 0 && puzzle[r][c] !== solution[r][c]) {
+        empty.push([r, c]);
+      }
+    }
+  }
+
+  if (!empty.length) {
+    checkWin();
+    return;
+  }
+
+  const [r, c] = empty[Math.floor(Math.random() * empty.length)];
+  puzzle[r][c] = solution[r][c];
+  selected = r * 9 + c;
+  render();
+  message.textContent = "Hint used! One cell filled.";
+  checkWin();
+}
+
+function resetGame() {
+  puzzle = original.map(row => row.slice());
+  selected = -1;
+  mistakes = 0;
+  render();
+  message.textContent = "Board reset. Try again!";
+}
+
+function checkWin() {
+  const won = puzzle.every((row, r) =>
+    row.every((value, c) => value === solution[r][c])
+  );
+
+  if (won) {
+    message.textContent = "🎉 Congratulations! Sudoku solved!";
+  }
+}
+
+newGame();
+</script>
+</body>
+</html>
